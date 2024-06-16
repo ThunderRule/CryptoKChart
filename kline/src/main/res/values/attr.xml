@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="KChartView">
+        <attr name="chart_textSize" format="dimension"/>
+        <attr name="chart_gridColor" format="color"/>
+    </declare-styleable>
+</resources>
