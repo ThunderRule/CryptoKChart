@@ -505,7 +505,7 @@ open class BaseKChartView @JvmOverloads constructor(
         }
 
     private fun changeTranslate(translateX: Float) {
-        //TODO 滑动边界监听
+        //TODO side listener
         when {
             translateX < getMinTranslateX() -> {
                 mTranslateX = getMinTranslateX()
