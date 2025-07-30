@@ -1,7 +1,5 @@
 package top.zdever.kline.model
 
-import top.zdever.kline.constants.ChildType
-
 /**
  * @description
  *
@@ -9,7 +7,8 @@ import top.zdever.kline.constants.ChildType
  * @createDate 2024/6/10
  */
 abstract class BaseKLineEntity : IKLine {
-    private val indexMap = hashMapOf<Int,List<Float>>()
+    private val mainIndexCache = hashMapOf<String,HashMap<Int,Double>>()
+    private val childIndexCache = hashMapOf<String,HashMap<Int,Double>>()
 
     abstract override fun getOpenPrice():String
 
@@ -23,9 +22,29 @@ abstract class BaseKLineEntity : IKLine {
 
     abstract override fun getTime(): Long
 
-    override fun getIndex(@ChildType key: Int) = indexMap[key]
+    override fun getMainIndex(childType: String,id:Int) = mainIndexCache[childType]?.get(id)
 
-    override fun setIndex(@ChildType key: Int, list: List<Float>) {
-        indexMap[key] = list
+    override fun getMainIndexList(childType: String) = mainIndexCache[childType]
+
+    override fun setMainIndex(childType: String, id: Int, value: Double) {
+        val map = mainIndexCache[childType]
+        if (map == null){
+            mainIndexCache[childType] = hashMapOf(id to value)
+        }else{
+            map[id] = value
+        }
+    }
+
+    override fun getChildIndex(childType: String, id: Int) = childIndexCache[childType]?.get(id)
+
+    override fun getChildIndexList(childType: String) = childIndexCache[childType]
+
+    override fun setChildIndex(childType: String, id: Int, value: Double) {
+        val map = childIndexCache[childType]
+        if (map == null){
+            childIndexCache[childType] = hashMapOf(id to value)
+        }else{
+            map[id] = value
+        }
     }
 }

@@ -13,6 +13,7 @@ data class KLineBean(
     val h:String,
     val l:String,
     val c:String,
+    val a:String,
     val vol:String,
     val date:Long,
 ) : BaseKLineEntity() {
@@ -27,5 +28,7 @@ data class KLineBean(
     override fun getVolume() = vol
 
     override fun getTime() = date
+
+    override fun getAmount() = a
 
 }

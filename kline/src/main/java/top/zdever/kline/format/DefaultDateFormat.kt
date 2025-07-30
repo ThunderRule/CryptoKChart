@@ -15,7 +15,12 @@ class DefaultDateFormat : IDateFormat {
     @SuppressLint("SimpleDateFormat")
     private val mmddhhmm = SimpleDateFormat("MM-dd HH:mm")
 
-    override fun format(date: Long): String {
-        return mmddhhmm.format(Date(date))
+    override fun format(date: Long?): String {
+        return if (date == null){
+            "--"
+        }else{
+            mmddhhmm.format(Date(date))
+        }
+
     }
 }

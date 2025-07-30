@@ -8,6 +8,6 @@ package top.zdever.kline.format
  */
 interface IValueFormat {
 
-    fun format(value:String):String
+    fun format(value:String?):String
 
 }

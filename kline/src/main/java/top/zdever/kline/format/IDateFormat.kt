@@ -8,6 +8,6 @@ package top.zdever.kline.format
  */
 interface IDateFormat {
 
-    fun format(date:Long):String
+    fun format(date:Long?):String
 
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="kchart_selector_time">Time</string>
+    <string name="kchart_selector_open">Open</string>
+    <string name="kchart_selector_high">High</string>
+    <string name="kchart_selector_low">Low</string>
+    <string name="kchart_selector_close">Close</string>
+    <string name="kchart_selector_volume">Vol</string>
+    <string name="kchart_selector_amplitude">Am</string>
+    <string name="kchart_selector_amount">Amount</string>
+</resources>

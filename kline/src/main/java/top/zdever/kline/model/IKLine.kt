@@ -1,7 +1,5 @@
 package top.zdever.kline.model
 
-import top.zdever.kline.constants.ChildType
-
 /**
  * @description
  *
@@ -10,23 +8,33 @@ import top.zdever.kline.constants.ChildType
  */
 interface IKLine {
 
-    fun getOpenPrice():String
+    fun getOpenPrice(): String
 
-    fun getHighPrice():String
+    fun getHighPrice(): String
 
-    fun getLowPrice():String
+    fun getLowPrice(): String
 
-    fun getClosePrice():String
+    fun getClosePrice(): String
 
-    fun getVolume():String
+    fun getVolume(): String
 
-    fun getTime():Long
+    fun getAmount():String
+
+    fun getTime(): Long
 
     /**
      * 各种指标
      */
-    fun getIndex(@ChildType key:Int):List<Float>?
+    fun getMainIndex(childType: String, id: Int): Double?
 
-    fun setIndex(@ChildType key: Int,list:List<Float>)
+    fun getMainIndexList(childType: String):HashMap<Int,Double>?
+
+    fun setMainIndex(childType: String, id: Int, value: Double)
+
+    fun getChildIndex(childType: String, id: Int): Double?
+
+    fun getChildIndexList(childType: String):HashMap<Int,Double>?
+
+    fun setChildIndex(childType: String, id: Int, value: Double)
 
 }

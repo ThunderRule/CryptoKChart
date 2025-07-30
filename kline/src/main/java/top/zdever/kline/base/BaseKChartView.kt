@@ -1,32 +1,38 @@
 package top.zdever.kline.base
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.database.DataSetObserver
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.text.TextPaint
 import android.util.AttributeSet
 import android.view.MotionEvent
-import top.zdever.kline.ScrollAndScaleView
-import top.zdever.kline.constants.BOTTOM_ALL
-import top.zdever.kline.constants.CHILD_MACD
-import top.zdever.kline.constants.CHILD_MAIN
-import top.zdever.kline.constants.CHILD_VOLUME
+import top.zdever.kline.R
+import top.zdever.kline.calculate.CalculateManager
+import top.zdever.kline.config.ChartConfig
+import top.zdever.kline.config.ConfigManger
+import top.zdever.kline.constants.CandleStyle
+import top.zdever.kline.constants.ChartType
 import top.zdever.kline.constants.IconPosition
-import top.zdever.kline.constants.ChildType
 import top.zdever.kline.constants.MAIN_CANDLE
 import top.zdever.kline.constants.TIME_15M
 import top.zdever.kline.constants.TIME_LINE
 import top.zdever.kline.constants.TimeType
-import top.zdever.kline.draw.LineChart
+import top.zdever.kline.draw.KDJChart
 import top.zdever.kline.draw.MACDChart
 import top.zdever.kline.draw.MainChart
 import top.zdever.kline.draw.VolumeChart
+import top.zdever.kline.draw.WRChart
 import top.zdever.kline.format.DefaultDateFormat
 import top.zdever.kline.format.DefaultValueFormat
+import top.zdever.kline.format.IValueFormat
+import top.zdever.kline.utils.CountDownUtils
 import top.zdever.kline.utils.SavedUtils
 import top.zdever.kline.utils.dp
 import top.zdever.kline.utils.logd
@@ -47,31 +53,34 @@ open class BaseKChartView @JvmOverloads constructor(
 
     private val DEFAULT_MAIN_HEIGHT = 300.dp
     private val DEFAULT_SUB_HEIGHT = 80.dp
-    private val DEFAULT_MAIN_VPADING = 10.dp
+
     private val DEFAULT_LEGEND_MARGIN = 10.dp
 
-    protected var addedChildMap = hashMapOf<Int, IChartDraw>()
-    protected var childRectMap = hashMapOf<Int, Rect>()
-    protected var addedChilds = arrayListOf<Int>()
     protected var gridColumns = 4
     protected var gridRows = 4
     protected var logoIcon: Bitmap? = null
     protected var fullScreenIcon: Bitmap? = null
-    protected var mTextHeight = 0f
     protected var mBaseLine = 0f
+    protected var mBorderRadius = 4f.dp
+    protected var mAxisPaddingH = 4f.dp
+    protected var mCandleStyle = CandleStyle.STYLE_USA
     protected val painXAxis = Paint(Paint.ANTI_ALIAS_FLAG)
     protected val painYAxis = Paint(Paint.ANTI_ALIAS_FLAG)
     protected val mTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
-    protected val gridPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
-    protected val selectCrossPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    protected val mLegendTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    protected val mBorderTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    protected val mAxisTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    protected val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    protected val selectCrossPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    protected val mBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    protected val mBorderBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    protected var popBgColor = Color.WHITE
+    protected var crossBgColor = Color.BLACK
 
-    /**
-     * 0：max value， 1：min value， 2：scale
-     */
-    private val maxMinValueMap = hashMapOf<Int, FloatArray>()
+    private val mCountDown = CountDownUtils()
+    private var chartMap = mutableMapOf<String, IChartDraw<*>>()
     private var mMainHeight = DEFAULT_MAIN_HEIGHT
     private var mChildHeight = DEFAULT_SUB_HEIGHT
-    private var mMainVPadding = DEFAULT_MAIN_VPADING
     private var mLegendMargin = DEFAULT_LEGEND_MARGIN
     private var viewWidth = 0f
     private var viewHeight = 0f
@@ -80,17 +89,23 @@ open class BaseKChartView @JvmOverloads constructor(
     private var logoTop = 0f
     private var fullScreenTop = 0f
     private var logoPosition = IconPosition.BOTTOM_LEFT
-    private var mAdapter: IAdapter? = null
     private var mStartIndex = 0
     private var mEndIndex = 0
     private var mTime = TIME_15M
     private var mainLineType = MAIN_CANDLE
     private var mainYScale = 1f
-    private var xBottomIndex = CHILD_MAIN
     private var mDateFormat = DefaultDateFormat()
-    private var mValueFormat = DefaultValueFormat()
+    private var mValueFormat: IValueFormat = DefaultValueFormat()
+    private var selectedX = 0f
+    private var selectedY = 0f
+    private var selectedPop = mutableMapOf<String, String>()
+    private var mMaxYLabelWidth = 0f
+    private var countDownStr = "--"
+    private var timeUnit = 900000L
 
     private var invalidateTime = 0L
+    private var mConfig = ConfigManger.getConfig()
+    private val priceInLineRect = RectF()
 
     @TimeType
     var selectedTime: Long = TIME_15M
@@ -108,28 +123,51 @@ open class BaseKChartView @JvmOverloads constructor(
     }
 
     init {
+        mBorderPaint.style = Paint.Style.STROKE
+        mBorderPaint.strokeWidth = 0.5f.dp
         val dashPathEffect = DashPathEffect(floatArrayOf(3f.dp, 3f.dp), 0f)
         selectCrossPaint.setPathEffect(dashPathEffect)
         selectCrossPaint.strokeWidth = 1f.dp
 
         for (index in SavedUtils.getIndexes()) {
-            addedChilds.add(index)
-            when (index) {
-                CHILD_MAIN -> addedChildMap[index] = MainChart(context)
-                CHILD_MACD -> addedChildMap[index] = MACDChart(context)
-                CHILD_VOLUME -> addedChildMap[index] = VolumeChart(context, index)
-                else -> addedChildMap[index] = LineChart(context, index)
+            val chart = when (index) {
+                ChartType.MACD -> {
+                    MACDChart(index)
+                }
+
+                ChartType.VOL -> {
+                    VolumeChart(index)
+                }
+
+                ChartType.KDJ -> {
+                    KDJChart(index)
+                }
+
+                ChartType.WR -> {
+                    WRChart(index)
+                }
+
+                else -> {
+                    MainChart(index)
+                }
             }
-            maxMinValueMap[index] = floatArrayOf(Float.MIN_VALUE, Float.MAX_VALUE, 0f)
+            chartMap[index] = chart
+            ConfigManger.setChildDefault(index, chart.getDefaultConfig())
+            CalculateManager.register(chart)
+            maxMinValueMap[index] = doubleArrayOf(Double.MIN_VALUE, Double.MAX_VALUE, 0.0)
+        }
+
+        mCountDown.setOnTick {
+            formatCountdown(it)
         }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        val totalHeight = if (addedChilds.contains(CHILD_MAIN)) {
-            mMainHeight + (addedChildMap.size - 1) * mChildHeight + mTextHeight
+        val totalHeight = if (chartMap.keys.contains(ChartType.MAIN)) {
+            mMainHeight + (chartMap.size - 1) * mChildHeight + mTextHeight
         } else {
-            addedChildMap.size * mChildHeight + mTextHeight
+            chartMap.size * mChildHeight + mTextHeight
         }
         setMeasuredDimension(
             widthMeasureSpec,
@@ -148,8 +186,8 @@ open class BaseKChartView @JvmOverloads constructor(
     private fun initRect() {
         columSpace = viewWidth / gridColumns
         var lastPositionY = 0
-        for (childName in addedChilds) {
-            val chartHeight = if (childName == CHILD_MAIN) {
+        for (childName in chartMap.keys) {
+            val chartHeight = if (childName == ChartType.MAIN) {
                 rowSpace = (mMainHeight - mTextHeight) / gridRows
                 mMainHeight
             } else {
@@ -188,6 +226,8 @@ open class BaseKChartView @JvmOverloads constructor(
             calculateValues()
             drawXAxis(canvas)
             drawChild(canvas)
+            drawTools(canvas)
+            drawLegend(canvas)
             drawYAxis(canvas)
             drawHisOrder(canvas)
             drawPriceLine(canvas)
@@ -209,6 +249,8 @@ open class BaseKChartView @JvmOverloads constructor(
             } else {
                 index
             }
+            selectedY = event.y
+            selectedX = event.x
             invalidate()
         }
     }
@@ -220,25 +262,33 @@ open class BaseKChartView @JvmOverloads constructor(
     }
 
     override fun onScaleChanged(scale: Float, oldScale: Float) {
-        if (scale == oldScale){
+        if (scale == oldScale) {
             return
         }
         val tempWidth = mPointWidth * scale
         val newCount = viewWidth / tempWidth
-        val oldCount = viewWidth/mPointWidth / oldScale
-        val diffCount = (newCount - oldCount)/2
+        val oldCount = viewWidth / mPointWidth / oldScale
+        val diffCount = (newCount - oldCount) / 2
         val dataWidth = getDataWidth()
-        if (mStartIndex > 0){
+        if (mStartIndex > 0) {
             changeTranslate(mTranslateX / oldScale * scale + diffCount * tempWidth)
-        }else{
-            if(dataWidth < viewWidth){
+        } else {
+            if (dataWidth < viewWidth) {
                 changeTranslate(dataWidth - viewWidth)
-            }else{
+            } else {
                 changeTranslate(getMaxTranslateX())
             }
         }
 
         limitInvalidate()
+    }
+
+    override fun onSingleTapUp(e: MotionEvent): Boolean {
+        if (priceInLineRect.contains(e.x,e.y)){
+            scrollToStart()
+            return true
+        }
+        return super.onSingleTapUp(e)
     }
 
     private fun drawGrid(canvas: Canvas) {
@@ -252,8 +302,8 @@ open class BaseKChartView @JvmOverloads constructor(
                 childRect.bottom.toFloat()
             }
 
-            if (childKey == CHILD_MAIN) {
-                val rowSpace = if (xBottomIndex == CHILD_MAIN) {
+            if (childKey == ChartType.MAIN) {
+                val rowSpace = if (xBottomIndex == ChartType.MAIN) {
                     (childRect.height() - mTextHeight * 2) / gridRows
                 } else {
                     (childRect.height() - mTextHeight) / gridRows
@@ -292,6 +342,16 @@ open class BaseKChartView @JvmOverloads constructor(
                 bottomPosition,
                 gridPaint
             )
+
+            if (childKey == xBottomIndex) {
+                canvas.drawLine(
+                    0f,
+                    childRect.bottom.toFloat(),
+                    viewWidth,
+                    childRect.bottom.toFloat(),
+                    gridPaint
+                )
+            }
         }
     }
 
@@ -301,7 +361,7 @@ open class BaseKChartView @JvmOverloads constructor(
 
     private fun drawXAxis(canvas: Canvas) {
         val bottomPosition = when (xBottomIndex) {
-            BOTTOM_ALL -> (viewHeight - mTextHeight).toInt()
+            ChartType.BOTTOM_ALL -> (viewHeight - mTextHeight).toInt()
             else -> childRectMap[xBottomIndex]!!.bottom
         }
         val positionY = bottomPosition - (mTextHeight - mBaseLine)
@@ -333,7 +393,7 @@ open class BaseKChartView @JvmOverloads constructor(
             val minValue = values[1]
             val percent = values[2]
             when (childName) {
-                CHILD_MAIN -> {
+                ChartType.MAIN -> {
                     val rowValue = (maxValue - minValue) / gridRows
                     for (i in 1..gridRows) {
                         val positionY = rowSpace * i + mBaseLine
@@ -343,8 +403,28 @@ open class BaseKChartView @JvmOverloads constructor(
                     }
                 }
 
-                else -> {
+                ChartType.MACD -> {
+                    val top = entry.value.top + mBaseLine + mTextHeight
+                    val topText = mValueFormat.format(maxValue.toString())
+                    val topTextWidth = mTextPaint.measureText(topText)
+                    canvas.drawText(topText, viewWidth - topTextWidth, top, mTextPaint)
+                }
 
+                else -> {
+                    val top = entry.value.top + mBaseLine + mTextHeight
+                    val topText = mValueFormat.format(maxValue.toString())
+                    val topTextWidth = mTextPaint.measureText(topText)
+                    canvas.drawText(topText, viewWidth - topTextWidth, top, mTextPaint)
+
+                    val bottom = entry.value.bottom - 2.dp
+                    val bottomText = mValueFormat.format(minValue.toString())
+                    val bottomTextWidth = mTextPaint.measureText(bottomText)
+                    canvas.drawText(
+                        bottomText,
+                        viewWidth - bottomTextWidth,
+                        bottom.toFloat(),
+                        mTextPaint
+                    )
                 }
             }
         }
@@ -358,42 +438,261 @@ open class BaseKChartView @JvmOverloads constructor(
             val curX = indexToTranslateX(i)
             val prePoint = if (i == 0) curPoint else getItem(i - 1)
             val preX = if (i == 0) curX else indexToTranslateX(i - 1)
-            val position = if (mSelectedIndex == -1) mEndIndex else mSelectedIndex
-            for (child in addedChildMap) {
-                val rect = childRectMap[child.key]
+            for (child in chartMap) {
                 val chartDraw = child.value
                 chartDraw.draw(canvas, prePoint, curPoint, preX, curX, i, this)
-                chartDraw.drawText(
-                    canvas,
-                    this,
-                    position,
-                    mLegendMargin.toFloat(),
-                    rect!!.top + mBaseLine
-                )
             }
         }
         canvas.restore()
+    }
+
+    private fun drawLegend(canvas: Canvas) {
+        val position = if (!showSelected) {
+            if (mEndIndex > mItemCount - 1) mItemCount - 1 else mEndIndex
+        } else mSelectedIndex
+
+        for (child in chartMap) {
+            val rect = childRectMap[child.key]
+            val chartDraw = child.value
+            chartDraw.drawText(
+                canvas,
+                this,
+                mLegendMargin.toFloat(),
+                rect!!.top + mBaseLine,
+                getItem(position)
+            )
+        }
     }
 
     private fun drawEmpty(canvas: Canvas) {
 
     }
 
+    /**
+     * 十字星选择
+     */
     private fun drawCross(canvas: Canvas) {
         val selectedX = indexToViewX(mSelectedIndex)
+        //绘制时间数值
         canvas.drawLine(selectedX, 0f, selectedX, viewHeight, selectCrossPaint)
+        val timeRect = childRectMap[xBottomIndex]!!
+        val date = mDateFormat.format(getItem(mSelectedIndex)?.getTime())
+        val textWidth = mAxisTextPaint.measureText(date)
+        val dateLeft = selectedX - textWidth / 2
+        val dateRight = selectedX + textWidth / 2
+        mBorderBgPaint.color = crossBgColor
+        canvas.drawRoundRect(
+            dateLeft - mAxisPaddingH,
+            timeRect.bottom - mTextHeight,
+            dateRight + mAxisPaddingH,
+            timeRect.bottom.toFloat(),
+            mBorderRadius, mBorderRadius,
+            mBorderBgPaint
+        )
+        canvas.drawText(date, dateLeft, timeRect.bottom - mTextHeight + mBaseLine, mAxisTextPaint)
 
+        //绘制y轴数值
+        for (entry in childRectMap) {
+            val key = entry.key
+            val rect = entry.value
+            val bottomY = if (xBottomIndex == key) mTextHeight else 0f
+            if (selectedY !in rect.top + mTextHeight..rect.bottom - bottomY) {
+                continue
+            }
+            val iChartDraw = chartMap[key]!!
+            canvas.drawLine(0f, selectedY, viewWidth, selectedY, selectCrossPaint)
+            val value = yToValue(key, selectedY)
+            val valueWidth =
+                mAxisTextPaint.measureText(iChartDraw.getValueFormatter().format(value.toString()))
+            val left = viewWidth - valueWidth
+            canvas.drawRoundRect(
+                left - mAxisPaddingH * 2,
+                selectedY - mTextHeight / 2,
+                viewWidth,
+                selectedY + mTextHeight / 2,
+                mBorderRadius, mBorderRadius,
+                mBorderBgPaint
+            )
+            mMaxYLabelWidth = max(mMaxYLabelWidth, valueWidth + mAxisPaddingH * 2)
+            canvas.drawText(
+                iChartDraw.getValueFormatter().format(value.toString()),
+                left - mAxisPaddingH,
+                selectedY - mTextHeight / 2 + mBaseLine,
+                mAxisTextPaint
+            )
+
+            canvas.drawCircle(selectedX, selectedY, 2f.dp, mBorderBgPaint)
+        }
+
+        drawSelector(canvas)
+    }
+
+    private fun drawSelector(canvas: Canvas) {
+        if (mSelectedIndex == -1) {
+            return
+        }
+
+        val item = getItem(mSelectedIndex) ?: return
+        val diffValue = item.getClosePrice().toDouble() - item.getOpenPrice().toDouble()
+
+        selectedPop[context.getString(R.string.kchart_selector_time)] =
+            mDateFormat.format(item.getTime())
+        selectedPop[context.getString(R.string.kchart_selector_open)] =
+            mValueFormat.format(item.getOpenPrice())
+        selectedPop[context.getString(R.string.kchart_selector_high)] =
+            mValueFormat.format(item.getHighPrice())
+        selectedPop[context.getString(R.string.kchart_selector_low)] =
+            mValueFormat.format(item.getLowPrice())
+        selectedPop[context.getString(R.string.kchart_selector_close)] =
+            mValueFormat.format(item.getClosePrice())
+        selectedPop[context.getString(R.string.kchart_selector_volume)] =
+            mValueFormat.format(item.getVolume())
+        selectedPop[context.getString(R.string.kchart_selector_amplitude)] =
+            mValueFormat.format(diffValue.toString())
+        selectedPop[context.getString(R.string.kchart_selector_amount)] =
+            mValueFormat.format(item.getVolume())
+
+
+        val paddingVertical = 4.dp
+        val paddingHorizontal = 4.dp
+        val popHeight = selectedPop.size * (mTextHeight + 2.dp) + paddingVertical * 2
+        var maxWidth = 0f
+        selectedPop.forEach { (key, value) ->
+            maxWidth = max(maxWidth, mTextPaint.measureText("${key}${value}"))
+        }
+        val popWidth = maxWidth + 12.dp + paddingHorizontal * 2
+        val bgRect = if (indexToViewX(mSelectedIndex) > viewWidth / 2) {
+            RectF(5f.dp, mTextHeight + 2.dp, popWidth + 5f.dp, mTextHeight + 2f.dp + popHeight)
+        } else {
+            RectF(
+                viewWidth - popWidth - mMaxYLabelWidth - 5f.dp,
+                mTextHeight + 2.dp,
+                viewWidth - mMaxYLabelWidth - 5f.dp,
+                mTextHeight + 2f.dp + popHeight
+            )
+        }
+        mBorderBgPaint.color = popBgColor
+        canvas.drawRoundRect(bgRect, 20f, 20f, mBorderBgPaint)
+
+        var tempTop = bgRect.top + paddingVertical + mTextHeight
+        val startPos = bgRect.left + paddingHorizontal
+        val endPos = bgRect.right - paddingHorizontal
+        for ((index, key) in selectedPop.keys.withIndex()) {
+            val value = selectedPop[key] ?: "--"
+            canvas.drawText(key, startPos, tempTop, mTextPaint)
+            val tempX = endPos - mTextPaint.measureText(value)
+            canvas.drawText(value, tempX, tempTop, mTextPaint)
+            tempTop += (mTextHeight + 2f.dp)
+        }
     }
 
     private fun drawPriceLine(canvas: Canvas) {
+        if (!mConfig.isOpenLastPrice && !mConfig.isOpenCountTimer) {
+            return
+        }
         val lastItem = getItem(mItemCount - 1)
         if (lastItem != null) {
-            val lastY = valueToY(CHILD_MAIN, lastItem.getClosePrice().toFloat())
+            val closePrice = lastItem.getClosePrice()
+            val lastY = valueToY(ChartType.MAIN, closePrice.toFloat())
+            val lastPriceX = indexToViewX(mItemCount - 1)
+            if (mEndIndex < mItemCount - 1) {
+                canvas.drawLine(0f, lastY, viewWidth, lastY, selectCrossPaint)
+                drawInLinePriceLabel(canvas,closePrice,lastY)
+            } else {
+                canvas.drawLine(lastPriceX, lastY, viewWidth, lastY, selectCrossPaint)
+                drawEndPriceLabel(canvas, closePrice, lastY)
+            }
+
 //            if (mEndIndex < mItemCount - 1){
 //                canvas.drawLine(0f,lastY,viewWidth,lastY,selectCrossPaint)
 //            }else{
 ////                canvas.drawLine()
 //            }
+        }
+    }
+
+    private fun drawEndPriceLabel(canvas: Canvas, lastPrice: String, y: Float) {
+        val formatPrice = mValueFormat.format(lastPrice)
+        val lastPriceWidth = mTextPaint.measureText(formatPrice)
+        val countDownWidth = mTextPaint.measureText(countDownStr)
+        val startPos = viewWidth - lastPriceWidth - 4f.dp
+        val endPos = viewWidth
+        if (mConfig.isOpenLastPrice) {
+            val rect = if (mConfig.isOpenCountTimer) {
+                RectF(startPos, y - mTextHeight - 2f.dp, endPos, y + mTextHeight + 2f.dp)
+            } else {
+                RectF(startPos, y - mTextHeight / 2 - 2f.dp, endPos, y + mTextHeight / 2 + 2f.dp)
+            }
+            mBorderBgPaint.color = Color.WHITE
+            canvas.drawRoundRect(rect, mBorderRadius, mBorderRadius, mBorderBgPaint)
+            canvas.drawRoundRect(rect, mBorderRadius, mBorderRadius, mBorderPaint)
+            canvas.drawText(
+                formatPrice,
+                rect.left + 2f.dp,
+                y - mTextHeight / 2 + mBaseLine,
+                mTextPaint
+            )
+        } else {
+            if (mConfig.isOpenCountTimer) {
+
+            } else {
+
+            }
+        }
+    }
+
+    private fun drawInLinePriceLabel(canvas: Canvas, lastPrice: String, y: Float) {
+        priceInLineRect.setEmpty()
+        val formatPrice = mValueFormat.format(lastPrice)
+        val lastPriceWidth = mTextPaint.measureText(formatPrice)
+        val countDownWidth = mTextPaint.measureText(countDownStr)
+        val startPos = viewWidth - viewWidth / 3
+        if (mConfig.isOpenLastPrice) {
+            if (mConfig.isOpenCountTimer) {
+                priceInLineRect.set(
+                    startPos,
+                    y - mTextHeight - 2f.dp,
+                    startPos + max(lastPriceWidth,countDownWidth)+4f.dp,
+                    y + mTextHeight + 2f.dp
+                )
+            } else {
+                priceInLineRect.set(
+                    startPos,
+                    y - mTextHeight / 2 - 2f.dp,
+                    startPos + lastPriceWidth + 4f.dp,
+                    y + mTextHeight / 2 + 2f.dp
+                )
+            }
+            mBorderBgPaint.color = Color.WHITE
+            canvas.drawRoundRect(priceInLineRect, mBorderRadius, mBorderRadius, mBorderBgPaint)
+            canvas.drawRoundRect(priceInLineRect, mBorderRadius, mBorderRadius, mBorderPaint)
+            canvas.drawText(
+                formatPrice,
+                priceInLineRect.left + 2f.dp,
+                y - mTextHeight / 2 + mBaseLine,
+                mTextPaint
+            )
+        } else {
+            if (mConfig.isOpenCountTimer) {
+
+            } else {
+
+            }
+        }
+    }
+
+    private fun drawTools(canvas: Canvas) {
+        val drawTools = SavedUtils.getDrawTools()
+        for (tool in drawTools) {
+            val startIndex = dateToIndex(tool.startTime) ?: return
+            val endIndex = dateToIndex(tool.endTime) ?: return
+            canvas.drawLine(
+                indexToViewX(startIndex),
+                valueToY(ChartType.MAIN, tool.startValue),
+                indexToViewX(endIndex),
+                valueToY(ChartType.MAIN, tool.endValue),
+                mTextPaint
+            )
         }
     }
 
@@ -407,23 +706,33 @@ open class BaseKChartView @JvmOverloads constructor(
 
     private fun calculateValues() {
         maxMinValueMap.clear()
-        mStartIndex = translateXToIndex(xToTranslateX(0f))
-        mEndIndex = translateXToIndex(xToTranslateX(viewWidth))
+        val scaleWidth = mPointWidth * scaleX
+        if (mTranslateX <= scaleWidth / 2) {
+            mStartIndex = ((-mTranslateX) / scaleWidth).toInt()
+        } else {
+            mStartIndex = 0
+        }
+        mEndIndex = (mStartIndex + viewWidth / scaleWidth + 0.5).toInt() + 1
+        if (mEndIndex > mItemCount - 1) {
+            mEndIndex = mItemCount - 1
+        }
+//        mStartIndex = translateXToIndex(xToTranslateX(0f))
+//        mEndIndex = translateXToIndex(xToTranslateX(viewWidth))
+        "start = $mStartIndex, end = $mEndIndex".logd()
 
-        for (child in addedChilds) {
-            maxMinValueMap[child] = floatArrayOf(Float.MIN_VALUE, Float.MAX_VALUE, 1f)
+        for (child in chartMap.keys) {
+            maxMinValueMap[child] = doubleArrayOf(Double.MIN_VALUE, Double.MAX_VALUE, 1.0)
         }
 
-        "startIndex = $mStartIndex, endIndex = $mEndIndex".logd()
         for (i in mStartIndex..mEndIndex) {
             val item = getItem(i)
             if (item != null) {
-                for (child in addedChildMap) {
+                for (child in chartMap) {
                     val iChartDraw = child.value
                     val values = maxMinValueMap[child.key]
                     values!![0] = max(values[0], iChartDraw.getMaxValue(item))
                     values[1] = min(values[1], iChartDraw.getMinValue(item))
-                    if (child.key == CHILD_MAIN) {
+                    if (child.key == ChartType.MAIN) {
 //                        if (mainHighMaxValue < item.getHighPrice().toFloat()) {
 //                            mainHighMaxValue = item.getHighPrice().toFloat()
 //                            mainMaxIndex = i
@@ -436,22 +745,26 @@ open class BaseKChartView @JvmOverloads constructor(
 
                     val rect = childRectMap[child.key]!!
                     val diff = values[0] - values[1]
-                    values[2] = if (child.key == CHILD_MAIN) {
-                        (rect.height() - mTextHeight * 2 - mMainVPadding) / diff
+                    val timeHeight = if (xBottomIndex == child.key) mTextHeight else 0f
+                    values[2] = if (child.key == ChartType.MAIN) {
+                        (rect.height() - mTextHeight - timeHeight - mMainVPadding * 2) / diff
                     } else {
-                        (rect.height() - mTextHeight) / diff
+                        (rect.height() - mTextHeight - timeHeight) / diff
                     }
 
-                    if (child.key == CHILD_MAIN) {
+                    if (child.key == ChartType.MAIN) {
                         if (diff < 1e-15) {
                             values[0] += diff * 0.05f
-                            values[0] -= diff * 0.05f
+                            values[1] -= diff * 0.05f
                         }
                     }
                 }
 
             }
 
+        }
+        maxMinValueMap[ChartType.MAIN]?.forEach {
+            it.logd()
         }
     }
 
@@ -468,34 +781,7 @@ open class BaseKChartView @JvmOverloads constructor(
         mPointWidth * mScaleX / 2
     }
 
-    private fun isFillScreen() = getDataWidth() >= viewWidth / mScaleX
-
-    internal fun valueToY(@ChildType childType: Int, value: Float): Float {
-        val rect = childRectMap[childType]!!
-        val maxMinValues = maxMinValueMap[childType]!!
-        return if (childType == CHILD_MAIN){
-            val topLimit = rect.top + mTextHeight + mMainVPadding
-            val tempValue = topLimit + (maxMinValues[0] - value) * maxMinValues[2]
-            val bottomLimit = rect.bottom - mTextHeight - mMainVPadding
-            when{
-                tempValue > bottomLimit -> bottomLimit
-                tempValue < topLimit -> topLimit
-                else -> tempValue
-            }
-        }else{
-            val topLimit = rect.top + mTextHeight
-            val tempValue = topLimit + (maxMinValues[0] - value) * maxMinValues[2]
-            when{
-                tempValue < topLimit -> topLimit
-                tempValue > rect.bottom -> rect.bottom.toFloat()
-                else -> tempValue
-            }
-        }
-    }
-
-    internal fun getMaxMinValues(@ChildType childType: Int) = maxMinValueMap[childType]
-
-    internal fun getRect(@ChildType childType: Int) = childRectMap[childType]
+    internal fun getRect(childType: String) = childRectMap[childType]
 
     private fun getItem(position: Int) =
         if (mAdapter == null || mAdapter!!.getCount() <= position || position < 0) {
@@ -504,24 +790,36 @@ open class BaseKChartView @JvmOverloads constructor(
             mAdapter?.getItem(position)
         }
 
+    private fun dateToIndex(date: Long): Int? {
+        val list = mAdapter?.getData() ?: return null
+        return list.binarySearch {
+            when {
+                it.getTime() - date < 0L -> -1
+                it.getTime() - date > 0L -> 1
+                else -> 0
+            }
+        }
+    }
+
     private fun changeTranslate(translateX: Float) {
         //TODO side listener
-        when {
+        mTranslateX = when {
             translateX < getMinTranslateX() -> {
-                mTranslateX = getMinTranslateX()
+                getMinTranslateX()
             }
 
             translateX > getMaxTranslateX() -> {
-                mTranslateX = getMaxTranslateX()
+                getMaxTranslateX()
             }
 
             else -> {
-                mTranslateX = translateX
+                translateX
             }
         }
 
-
     }
+
+    internal fun legendTextPaint() = mLegendTextPaint
 
     private fun limitInvalidate() {
         if (System.currentTimeMillis() - invalidateTime > 15) {
@@ -530,11 +828,76 @@ open class BaseKChartView @JvmOverloads constructor(
         }
     }
 
-    fun setAdapter(adapter: IAdapter) {
+    private fun formatCountdown(tick: Long) {
+        val day = tick / 86400000
+        val surplusMils = tick - day * 86400000
+        val hour = surplusMils / 3600000
+        val minute = (surplusMils - (hour * 3600000)) / 60000
+        val second = (surplusMils - (hour * 3600000) - 60000 * minute) / 1000
+        if (day >= 0 && hour >= 0 && minute >= 0 && second >= 0) {
+            val strBuilder = StringBuilder()
+            val minStr = if (minute < 10) "0$minute" else minute.toString()
+            val secondStr = if (second < 10) "0$second" else second.toString()
+            if (tick <= 3600000) {
+                strBuilder.append(minStr).append(":").append(secondStr)
+            } else {
+                val hourStr = if (hour < 10) "0${hour}" else hour.toString()
+                if (tick <= 86400000) {
+                    strBuilder.append(hourStr).append(":").append(minStr).append(":")
+                        .append(secondStr)
+                } else {
+                    strBuilder.append(day).append("D:").append(hourStr).append("H")
+                }
+            }
+            val tempStr = strBuilder.toString()
+            if (countDownStr != tempStr) {
+                countDownStr = tempStr
+                invalidate()
+            }
+        }
+
+    }
+
+    private fun scrollToStart(){
+        showSelected = false
+        val animator = ValueAnimator.ofFloat(mTranslateX, getMinTranslateX()).setDuration(400)
+        animator.repeatCount = 0
+        animator.addUpdateListener {
+                changeTranslate(it.animatedValue as Float)
+                limitInvalidate()
+            }
+        animator.start()
+        mSelectedIndex = -1
+    }
+
+    fun changeTimeUnit(time: Long) {
+        timeUnit = time
+        countDownStr = "--"
+        val lastPoint = getItem(mItemCount - 1)
+        if (lastPoint != null) {
+            val futureTime = lastPoint.getTime() + timeUnit - System.currentTimeMillis()
+            mCountDown.reset(futureTime)
+        }
+    }
+
+    fun setAdapter(adapter: IAdapter) = apply {
         mAdapter?.unregisterDataSetObserver(dataSetObserver)
         mAdapter = adapter
         mAdapter?.registerDataSetObserver(dataSetObserver)
         mItemCount = mAdapter?.getCount() ?: 0
+    }
+
+    fun setValueFormatter(valueFormat: IValueFormat) = apply {
+        mValueFormat = valueFormat
+        for (entry in chartMap) {
+            entry.value.setValueFormatter(valueFormat)
+        }
+    }
+
+    fun updateConfig(config: ChartConfig) {
+        mConfig = config
+        ConfigManger.saveConfig(config)
+        invalidate()
     }
 
 }

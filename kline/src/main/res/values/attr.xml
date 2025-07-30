@@ -3,5 +3,8 @@
     <declare-styleable name="KChartView">
         <attr name="chart_textSize" format="dimension"/>
         <attr name="chart_gridColor" format="color"/>
+        <attr name="chart_popBgColor" format="color"/>
+        <attr name="chart_crossBgColor" format="color"/>
+        <attr name="chart_crossTextColor" format="color"/>
     </declare-styleable>
 </resources>

@@ -3,10 +3,10 @@ package top.zdever.kline.adapter
 import android.database.DataSetObservable
 import android.database.DataSetObserver
 import top.zdever.kline.base.IAdapter
+import top.zdever.kline.calculate.CalculateManager
 import top.zdever.kline.constants.TimeType
 import top.zdever.kline.model.BaseKLineEntity
 import top.zdever.kline.model.IKLine
-import top.zdever.kline.utils.DefaultDataTool
 
 /**
  * @description
@@ -17,11 +17,12 @@ import top.zdever.kline.utils.DefaultDataTool
 class KLineEntityAdapter : IAdapter {
     private val mDataSetObservable = DataSetObservable()
     private val dataList = arrayListOf<IKLine>()
-    private val dataTool = DefaultDataTool()
 
     override fun getCount() = dataList.size
 
     override fun getItem(position: Int) = dataList[position]
+
+    override fun getData() = dataList
 
     override fun registerDataSetObserver(observer: DataSetObserver?) {
         if (observer != null) {
@@ -52,7 +53,7 @@ class KLineEntityAdapter : IAdapter {
         dataList.clear()
         if (!list.isNullOrEmpty()){
             dataList.addAll(0,list)
-            dataTool.calculate(dataList)
+            CalculateManager.calculateAll(list)
         }
         notifyDataSetChanged()
     }

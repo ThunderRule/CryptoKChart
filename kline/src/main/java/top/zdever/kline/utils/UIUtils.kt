@@ -1,7 +1,9 @@
 package top.zdever.kline.utils
 
+import android.content.Context
 import android.content.res.Resources
-
+import androidx.annotation.ColorRes
+import androidx.core.content.ContextCompat
 
 
 /**
@@ -27,3 +29,5 @@ val Float.sp:Float
 val Int.sp:Int
     @JvmName("spToPx")
     get() = (this * displayMetrics.scaledDensity+0.5f).toInt()
+
+fun Context.color(@ColorRes color:Int) = ContextCompat.getColor(this,color)

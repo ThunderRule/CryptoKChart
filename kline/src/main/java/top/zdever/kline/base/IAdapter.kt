@@ -16,6 +16,8 @@ interface IAdapter {
 
     fun getItem(position:Int):IKLine
 
+    fun getData():List<IKLine>
+
     fun registerDataSetObserver(observer: DataSetObserver?)
 
     fun unregisterDataSetObserver(observer: DataSetObserver?)

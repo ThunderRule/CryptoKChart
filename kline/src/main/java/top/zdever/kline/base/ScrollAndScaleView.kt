@@ -1,15 +1,20 @@
-package top.zdever.kline
+package top.zdever.kline.base
 
 import android.content.Context
+import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.widget.FrameLayout
 import android.widget.OverScroller
+import top.zdever.kline.constants.ChartType
 import top.zdever.kline.constants.SelectType
 import top.zdever.kline.listener.OnScrollListener
+import top.zdever.kline.model.DrawLineEntity
+import top.zdever.kline.utils.SavedUtils
 import top.zdever.kline.utils.dp
+import top.zdever.kline.utils.logd
 import kotlin.math.round
 
 /**
@@ -24,6 +29,8 @@ abstract class ScrollAndScaleView @JvmOverloads constructor(
     defStyle: Int = 0
 ) : FrameLayout(context, attrs, defStyle), GestureDetector.OnGestureListener,
     ScaleGestureDetector.OnScaleGestureListener {
+
+    private val DEFAULT_MAIN_VPADING = 10.dp
 
     protected var mScrollX = 0f
     protected var showSelected = false
@@ -41,8 +48,20 @@ abstract class ScrollAndScaleView @JvmOverloads constructor(
     protected var mItemCount = 0
     protected var overScrollRange = 100.dp
     protected var mSelectedIndex = -1
+    private var isEditMode = false
+    protected var mAdapter: IAdapter? = null
+    private var tempLine:DrawLineEntity? = null
 
-    private var mScrollListener:OnScrollListener? = null
+    /**
+     * 0：max value， 1：min value， 2：scale
+     */
+    protected val maxMinValueMap = hashMapOf<String, DoubleArray>()
+    protected var childRectMap = hashMapOf<String, Rect>()
+    protected var mTextHeight = 0f
+    protected var mMainVPadding = DEFAULT_MAIN_VPADING
+    protected var xBottomIndex = ChartType.MAIN
+
+    private var mScrollListener: OnScrollListener? = null
 
     protected val overScroller: OverScroller
     protected val gestureDetector: GestureDetector
@@ -55,10 +74,11 @@ abstract class ScrollAndScaleView @JvmOverloads constructor(
         overScroller = OverScroller(context)
     }
 
+
     override fun onTouchEvent(event: MotionEvent?): Boolean {
         event ?: return super.onTouchEvent(event)
 
-        if (event.pointerCount > 1) {
+        if (event.pointerCount > 1 || isEditMode) {
             showSelected = false
             mSelectedIndex = -1
         }
@@ -80,6 +100,13 @@ abstract class ScrollAndScaleView @JvmOverloads constructor(
 
             MotionEvent.ACTION_UP -> {
                 touch = false
+                if (isEditMode){
+                    if (tempLine == null){
+                        tempLine = createLine(event)
+                    }else{
+                        closeLine(event,tempLine)
+                    }
+                }
                 invalidate()
             }
 
@@ -112,17 +139,20 @@ abstract class ScrollAndScaleView @JvmOverloads constructor(
                 showSelected = true
                 onSelectedChange(e)
             }
+
             SelectType.SELECT_PRESS -> {
                 showSelected = true
             }
+
             SelectType.SELECT_BOTH -> {
-                if (showSelected){
+                if (showSelected) {
                     showSelected = false
-                }else{
+                } else {
                     showSelected = true
                     onSelectedChange(e)
                 }
             }
+
             SelectType.SELECT_NONE -> {
 
             }
@@ -137,15 +167,15 @@ abstract class ScrollAndScaleView @JvmOverloads constructor(
         distanceY: Float
     ): Boolean {
         showSelected = false
-        if (!isMultipleTouch || isScrollEnable){
-            scrollBy(round(distanceX).toInt(),0)
+        if (!isMultipleTouch && isScrollEnable && !isEditMode) {
+            scrollBy(round(distanceX).toInt(), 0)
             return true
         }
         return false
     }
 
     override fun onLongPress(e: MotionEvent) {
-        if (selectModel == SelectType.SELECT_PRESS || selectModel == SelectType.SELECT_BOTH){
+        if (selectModel == SelectType.SELECT_PRESS || selectModel == SelectType.SELECT_BOTH) {
             showSelected = true
             onSelectedChange(e)
         }
@@ -174,7 +204,7 @@ abstract class ScrollAndScaleView @JvmOverloads constructor(
 
     override fun computeScroll() {
         if (overScroller.computeScrollOffset()) {
-            if (!touch && isScrollEnable) {
+            if (!touch && isScrollEnable && !isEditMode) {
                 scrollTo(overScroller.currX, overScroller.currY)
             } else {
                 overScroller.forceFinished(true)
@@ -184,37 +214,37 @@ abstract class ScrollAndScaleView @JvmOverloads constructor(
     }
 
     override fun scrollBy(x: Int, y: Int) {
-        if (isScaleEnable){
+        if (isScaleEnable) {
             scrollTo((mScrollX - round(x / mScaleX)).toInt(), 0)
-        }else{
+        } else {
             overScroller.forceFinished(true)
         }
     }
 
     override fun scrollTo(x: Int, y: Int) {
-        if (isScrollEnable){
+        if (isScrollEnable) {
             val oldX = mScrollX
             mScrollX = x.toFloat()
-            if (mScrollX != oldX){
-                onScrollChanged(mScrollX.toInt(),0, oldX.toInt(),0)
+            if (mScrollX != oldX) {
+                onScrollChanged(mScrollX.toInt(), 0, oldX.toInt(), 0)
             }
-        }else{
+        } else {
             overScroller.forceFinished(true)
         }
     }
 
     override fun onScale(detector: ScaleGestureDetector): Boolean {
-        if (!isScaleEnable){
+        if (!isScaleEnable) {
             return false
         }
         val oldScale = mScaleX
         mScaleX *= detector.scaleFactor
-        if (mScaleX < scaleXMin){
+        if (mScaleX < scaleXMin) {
             mScaleX = scaleXMin
-        }else if (mScaleX > scaleXMax){
+        } else if (mScaleX > scaleXMax) {
             mScaleX = scaleXMax
         }
-        onScaleChanged(mScaleX,oldScale)
+        onScaleChanged(mScaleX, oldScale)
 
         return true
     }
@@ -247,24 +277,99 @@ abstract class ScrollAndScaleView @JvmOverloads constructor(
 
     protected fun translateXToX(translateX: Float) = translateX + mTranslateX
 
-    protected fun translateXToIndex(translateX: Float):Int{
-        return if (getDataWidth() < width){
+    protected fun translateXToIndex(translateX: Float): Int {
+        return if (getDataWidth() < width) {
             (translateX + mTranslateX) / mPointWidth / mScaleX + 0.5f
-        }else{
+        } else {
             translateX / mPointWidth / mScaleX
         }.toInt()
     }
 
     protected fun indexToTranslateX(index: Int): Float = index * mPointWidth * mScaleX
 
-    protected fun indexToViewX(index: Int):Float{
-        val leftIndex = translateXToIndex(xToTranslateX(0f))
-        val diff = index - leftIndex
-        return indexToTranslateX(diff)
+    protected fun indexToViewX(index: Int): Float {
+        val diffTranslate = indexToTranslateX(index)+mTranslateX
+        """
+            t = $mTranslateX,
+            it = ${indexToTranslateX(index)},
+            diff = $diffTranslate
+        """.trimIndent().logd()
+        return diffTranslate
     }
 
     protected fun getDataWidth() = (mItemCount - 1) * mPointWidth * scaleX + overScrollRange
 
+
+    private fun createLine(event: MotionEvent): DrawLineEntity? {
+        mAdapter ?: return null
+        val index = translateXToIndex(xToTranslateX(event.x))
+        val time = mAdapter!!.getItem(index).getTime()
+        val value = yToValue(ChartType.MAIN, event.y)
+        return DrawLineEntity(System.currentTimeMillis(),time,value)
+    }
+
+    private fun closeLine(event: MotionEvent, drawLineEntity: DrawLineEntity?){
+        mAdapter ?: return
+        val index = translateXToIndex(xToTranslateX(event.x))
+        drawLineEntity?.endTime = mAdapter!!.getItem(index).getTime()
+        drawLineEntity?.endValue = yToValue(ChartType.MAIN, event.y)
+        SavedUtils.saveDrawTool(drawLineEntity?.copy())
+        tempLine = null
+    }
+
+    internal fun valueToY(childType: String, value: Float): Float {
+        val rect = childRectMap[childType]!!
+        val maxMinValues = maxMinValueMap[childType]!!
+        return if (childType == ChartType.MAIN) {
+            val topLimit = rect.top + mTextHeight + mMainVPadding
+            val tempY = topLimit + (maxMinValues[0] - value) * maxMinValues[2]
+            if (tempY<topLimit){
+                topLimit
+            }else if (tempY > rect.bottom - mTextHeight - mMainVPadding){
+                rect.bottom - mTextHeight - mMainVPadding
+            }else{
+                tempY
+            }
+        } else {
+            val topLimit = rect.top + mTextHeight
+            topLimit + (maxMinValues[0] - value) * maxMinValues[2]
+        }.toFloat()
+    }
+
+    internal fun yToValue(childType: String, y: Float): Float {
+        val rect = childRectMap[childType]!!
+        val maxMinValues = maxMinValueMap[childType]!!
+        val timeHeight = if (childType == xBottomIndex) mTextHeight else 0f
+        val value = when (childType) {
+            ChartType.MAIN -> {
+                maxMinValues[1] + (maxMinValues[0] - maxMinValues[1]) / (rect.height() - timeHeight - mTextHeight - mMainVPadding * 2) * (rect.bottom - timeHeight - mMainVPadding - y)
+            }
+
+            ChartType.MACD -> {
+                val diff = maxMinValues[0] - maxMinValues[1]
+                val zeroLine = valueToY(ChartType.MACD, 0f)
+                val everyHeight = diff / (rect.height() - timeHeight - mTextHeight)
+                everyHeight * (zeroLine - y)
+            }
+
+            else -> {
+                maxMinValues[0] / (rect.height() - timeHeight - mTextHeight) * (rect.bottom - timeHeight - y)
+            }
+        }
+        return value.toFloat()
+    }
+
+    fun openEdit() {
+        isEditMode = true
+    }
+
+    fun closeEdit() {
+        isEditMode = false
+    }
+
     abstract fun onSelectedChange(event: MotionEvent)
+
+    internal fun getSelectedIndex() = mSelectedIndex
+
 
 }

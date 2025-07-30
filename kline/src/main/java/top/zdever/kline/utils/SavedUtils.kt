@@ -1,14 +1,8 @@
 package top.zdever.kline.utils
 
 import org.json.JSONArray
-import org.json.JSONObject
-import top.zdever.kline.constants.CHILD_KDJ
-import top.zdever.kline.constants.CHILD_MACD
-import top.zdever.kline.constants.CHILD_MAIN
-import top.zdever.kline.constants.CHILD_RSI
-import top.zdever.kline.constants.CHILD_SAR
-import top.zdever.kline.constants.CHILD_VOLUME
-import top.zdever.kline.constants.CHILD_WR
+import top.zdever.kline.constants.ChartType
+import top.zdever.kline.model.DrawLineEntity
 
 /**
  * @description
@@ -17,9 +11,10 @@ import top.zdever.kline.constants.CHILD_WR
  * @createDate 2024/6/11
  */
 object SavedUtils {
-    private val cachedIndexes = arrayListOf<Int>()
+    private val cachedIndexes = arrayListOf<String>()
+    private val cacheDrawTools = arrayListOf<DrawLineEntity>()
 
-    fun saveIndexes(index:Int){
+    fun saveIndexes(index: String) {
         cachedIndexes.add(index)
         val jsonArray = JSONArray()
         for (i in cachedIndexes) {
@@ -29,15 +24,21 @@ object SavedUtils {
 
     }
 
-    fun getIndexes():ArrayList<Int>{
-        cachedIndexes.add(CHILD_MAIN)
-        cachedIndexes.add(CHILD_VOLUME)
-//        cachedIndexes.add(CHILD_KDJ)
-        cachedIndexes.add(CHILD_WR)
-//        cachedIndexes.add(CHILD_RSI)
-//        cachedIndexes.add(CHILD_MACD)
-//        cachedIndexes.add(CHILD_SAR)
+    fun getIndexes(): ArrayList<String> {
+        cachedIndexes.add(ChartType.MAIN)
+        cachedIndexes.add(ChartType.VOL)
+        cachedIndexes.add(ChartType.KDJ)
+        cachedIndexes.add(ChartType.WR)
+//        cachedIndexes.add(ChartType.RSI)
+        cachedIndexes.add(ChartType.MACD)
         return cachedIndexes
+    }
+
+    fun getDrawTools() = cacheDrawTools
+
+    fun saveDrawTool(drawLineEntity: DrawLineEntity?){
+        drawLineEntity?:return
+        cacheDrawTools.add(drawLineEntity)
     }
 
 }
